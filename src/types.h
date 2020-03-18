@@ -84,6 +84,7 @@ struct Material
 	int specularGlossiness;
 	float kr;
 	float ior;//intex of refraction
+	bool pattern;
 };
 
 struct Surfel

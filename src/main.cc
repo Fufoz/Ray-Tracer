@@ -236,7 +236,7 @@ static inline Vec3 phongShade(const Ray& ray, const Surfel& surfel, const PointL
 	Vec3 lightVector = normaliseVec3(surfel.position - pointLight.position);
 	Vec3 diffuseTerm = surfel.material.diffuseColor * std::max<float>(std::abs(dotVec3(lightVector, surfel.normal)), 0.f);
 	Vec3 reflectedRay = reflectRay(lightVector, surfel.normal);
-	Vec3 viewVector = ray.direction;
+	Vec3 viewVector = -1.f * ray.direction;
 	Vec3 specularTerm = surfel.material.specularColor * std::powf(std::max(dotVec3(viewVector, reflectedRay), 0.f), surfel.material.specularGlossiness);
 
 	diffuseTerm = pointLight.color ^ diffuseTerm;
@@ -285,12 +285,12 @@ static bool visible(const Scene& scene, const Vec3& from, const Vec3& to)
 	return true;
 }
 
-static const uint32_t MAX_DEPTH = 1;
+static const uint32_t MAX_DEPTH = 4;
 
 static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 {
-	Vec3 color = {0.447f, 0.941f, 0.972f};
-//	const Vec3 background = {0.447f, 0.941f, 0.972f};
+	Vec3 color = {};
+	const Vec3 background = {0.447f, 0.941f, 0.972f};
 //	color = background;
 	if(depth > MAX_DEPTH) return color;
 
@@ -376,19 +376,6 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 			surfel.position = X;
 			surfel.normal = normaliseVec3(X - closestSphere.position);
 			surfel.material = scene.materials[closestSphere.matId];
-
-		}
-		//ambient constant
-		Vec3 ambientTerm = surfel.material.diffuseColor ^ Vec3{0.5f, 0.5f, 0.5f};
-
-		color = ambientTerm;
-
-		for(uint32_t i = 0; i < scene.pointLightCount; i++)
-		{
-			if(visible(scene, surfel.position, scene.pointLights[i].position))
-			{
-				color += phongShade(currentRay, surfel, scene.pointLights[i]);
-			}
 		}
 
 		switch(surfel.material.mtype)
@@ -408,22 +395,47 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 
 				//cast reflection ray
 				Vec3 reflectRayDir = reflectRay(currentRay.direction, surfel.normal);
-				Vec3 rayOrigin = isOutside ? X + bounceCoeff * reflectRayDir : X - bounceCoeff * reflectRayDir;
+				Vec3 rayOrigin = isOutside ? X + bounceCoeff * surfel.normal : X - bounceCoeff * surfel.normal;
 				Ray newRay = {rayOrigin, reflectRayDir};
 				color += kr * rayCast(scene, newRay, depth + 1);
-				
+				assert(kr > 0.f && kr < 1.f);
 				//cast refracted ray
 				bool isRefracted = false;
 				Vec3 refractRayDir = refractRay(currentRay.direction, surfel.normal, surfel.material.ior, &isRefracted);
 				if(isRefracted)
 				{
-					Vec3 refractRayOrigin = isOutside ? X - bounceCoeff * refractRayDir : X + bounceCoeff * refractRayDir;
+					Vec3 refractRayOrigin = isOutside ? X - bounceCoeff * surfel.normal : X + bounceCoeff * surfel.normal;
 					Ray newRefractRay = {refractRayOrigin, refractRayDir};
 					color += (1.f - kr) * rayCast(scene, newRefractRay, depth + 1);
 				}
 				break;
 			}
 			case MTYPE_DIFFUSE : {
+				
+				//ambient constant
+				Vec3 ambientTerm = surfel.material.diffuseColor ^ Vec3{0.5f, 0.5f, 0.5f};
+				color = ambientTerm;
+
+				for(uint32_t i = 0; i < scene.pointLightCount; i++)
+				{
+					// bool vis = visible(scene, surfel.position, scene.pointLights[i].position);
+					// assert(vis && !"WTF IS THIS");
+					if(visible(scene, surfel.position, scene.pointLights[i].position))
+					{
+						color += phongShade(currentRay, surfel, scene.pointLights[i]);
+					}
+				}
+
+				if(surfel.material.pattern)
+				{
+					float x = X.x;
+					float checkerSize = 0.3f;
+					if((int)std::floor(x / checkerSize) % 2 == 0)
+					{
+						color = RGB_BLACK;
+					}
+				}
+
 				break;
 			}
 			default : {
@@ -431,6 +443,10 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 				return color;
 			}
 		};
+	}
+	else//if no intersection were found 
+	{
+		color = background;
 	}
 
 	return clamp(color, RGB_BLACK, RGB_WHITE);
@@ -442,7 +458,7 @@ int main(int arc, char** argv)
 	hoth::log::info("Hello from hoth!");
 
 	Bitmap bitmap = {};
-	if(!createBitmap(640u, 480u, &bitmap))
+	if(!createBitmap(1920u, 1080u, &bitmap))
 	{
 		return -1;
 	}
@@ -451,9 +467,9 @@ int main(int arc, char** argv)
 	//absolute distance to image plane
 	camera.znear = 1.f;
 	camera.vfov = toRad(90.f);
-	camera.origin = {0.f, 0.3f, 1.f};
+	camera.origin = {0.f, 0.5f, 1.f};
 	Vec3 UpDir = {0.f, 0.5f, 0.f};
-	Vec3 lookAt = {0.f, 0.f, 0.f};
+	Vec3 lookAt = {0.f, 0.f, -1.f};
 	Vec3 zAxis  = normaliseVec3(camera.origin - lookAt);
 	Vec3 xAxis = normaliseVec3(cross(UpDir, zAxis));
 	Vec3 yAxis = cross(zAxis, xAxis);
@@ -478,19 +494,20 @@ int main(int arc, char** argv)
 	Material materials[10] = {};
 	materials[0].diffuseColor = {0.46f, 0.69f, 0.77f};
 	materials[0].specularColor = {0.5f, 0.5f, 0.5f};
-	materials[0].specularGlossiness = 0;
-	materials[0].mtype = MTYPE_DIFFUSE;
-	materials[0].ior = 1.5f;
+	materials[0].specularGlossiness = 256;
+	materials[0].mtype = MTYPE_DIELECTRIC;
+	materials[0].ior = 1.7f;
 
 	materials[1].diffuseColor = {0.98f, 0.73f, 0.14f};
 	materials[1].specularColor = {0.5f, 0.5f, 0.5f};
-	materials[1].specularGlossiness = 4;
+	materials[1].specularGlossiness = 256;
 	materials[1].mtype = MTYPE_DIFFUSE;
 
 	materials[2].diffuseColor = {0.59f, 0.47f, 0.69f};
 	materials[2].specularColor = {0.1f, 0.1f, 0.1f};
 	materials[2].specularGlossiness = 4;
-	materials[2].mtype = MTYPE_REFLECTIVE;
+	materials[2].mtype = MTYPE_DIFFUSE;
+	materials[2].pattern = true;
 
 	Sphere spheres[10] = {};
 	spheres[0].position = {0.f, 0.5f, -2.f};
@@ -513,7 +530,7 @@ int main(int arc, char** argv)
 
 	Scene scene = {};
 	scene.spheres = spheres;
-	scene.sphereCount = 1;
+	scene.sphereCount = 2;
 	scene.planes = planes;
 	scene.planesCount = 1;
 	//scene.triangles = &triangle;
