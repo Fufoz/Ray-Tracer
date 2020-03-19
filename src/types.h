@@ -71,8 +71,8 @@ struct Triangle
 
 enum MaterialType
 {
+	MTYPE_MIRROR,
 	MTYPE_DIFFUSE,
-	MTYPE_REFLECTIVE,
 	MTYPE_DIELECTRIC
 };
 

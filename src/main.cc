@@ -377,10 +377,22 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 			surfel.normal = normaliseVec3(X - closestSphere.position);
 			surfel.material = scene.materials[closestSphere.matId];
 		}
+		//ambient constant
+		Vec3 ambientTerm = surfel.material.diffuseColor ^ Vec3{0.7f, 0.7f, 0.7f};
+		Vec3 diffuse= {};
+		diffuse += ambientTerm;
+
+		for(uint32_t i = 0; i < scene.pointLightCount; i++)
+		{
+			if(visible(scene, surfel.position, scene.pointLights[i].position))
+			{
+				diffuse += phongShade(currentRay, surfel, scene.pointLights[i]);
+			}
+		}
 
 		switch(surfel.material.mtype)
 		{
-			case MTYPE_REFLECTIVE : {
+			case MTYPE_MIRROR : {
 				Vec3 reflectRayDir = reflectRay(currentRay.direction, surfel.normal);
 				Vec3 rayOrigin = X + bounceCoeff * reflectRayDir;
 				Ray newRay = {rayOrigin, reflectRayDir};
@@ -407,24 +419,13 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 					Vec3 refractRayOrigin = isOutside ? X - bounceCoeff * surfel.normal : X + bounceCoeff * surfel.normal;
 					Ray newRefractRay = {refractRayOrigin, refractRayDir};
 					color += (1.f - kr) * rayCast(scene, newRefractRay, depth + 1);
+					color = hadamard(diffuse, color); 
 				}
 				break;
 			}
 			case MTYPE_DIFFUSE : {
 				
-				//ambient constant
-				Vec3 ambientTerm = surfel.material.diffuseColor ^ Vec3{0.5f, 0.5f, 0.5f};
-				color = ambientTerm;
-
-				for(uint32_t i = 0; i < scene.pointLightCount; i++)
-				{
-					// bool vis = visible(scene, surfel.position, scene.pointLights[i].position);
-					// assert(vis && !"WTF IS THIS");
-					if(visible(scene, surfel.position, scene.pointLights[i].position))
-					{
-						color += phongShade(currentRay, surfel, scene.pointLights[i]);
-					}
-				}
+				color = diffuse;
 
 				if(surfel.material.pattern)
 				{
@@ -467,7 +468,7 @@ int main(int arc, char** argv)
 	//absolute distance to image plane
 	camera.znear = 1.f;
 	camera.vfov = toRad(90.f);
-	camera.origin = {0.f, 0.5f, 1.f};
+	camera.origin = {0.f, 0.9f, 1.f};
 	Vec3 UpDir = {0.f, 0.5f, 0.f};
 	Vec3 lookAt = {0.f, 0.f, -1.f};
 	Vec3 zAxis  = normaliseVec3(camera.origin - lookAt);
@@ -493,10 +494,10 @@ int main(int arc, char** argv)
 	
 	Material materials[10] = {};
 	materials[0].diffuseColor = {0.46f, 0.69f, 0.77f};
-	materials[0].specularColor = {0.5f, 0.5f, 0.5f};
+	materials[0].specularColor = {1.f, 1.f, 1.f};
 	materials[0].specularGlossiness = 256;
 	materials[0].mtype = MTYPE_DIELECTRIC;
-	materials[0].ior = 1.7f;
+	materials[0].ior = 1.f;
 
 	materials[1].diffuseColor = {0.98f, 0.73f, 0.14f};
 	materials[1].specularColor = {0.5f, 0.5f, 0.5f};
@@ -509,6 +510,11 @@ int main(int arc, char** argv)
 	materials[2].mtype = MTYPE_DIFFUSE;
 	materials[2].pattern = true;
 
+	materials[3].diffuseColor = {0.6f, 0.470f, 0.886f};
+	materials[3].specularColor = {0.5f, 0.5f, 0.5f};
+	materials[3].specularGlossiness = 256;
+	materials[3].mtype = MTYPE_MIRROR;
+	
 	Sphere spheres[10] = {};
 	spheres[0].position = {0.f, 0.5f, -2.f};
 	spheres[0].radius = 1.f;
@@ -517,6 +523,10 @@ int main(int arc, char** argv)
 	spheres[1].position = {1.0f, 0.5f, -0.5f};
 	spheres[1].radius = 0.6f;
 	spheres[1].matId = 1;
+
+	spheres[2].position = {-5.0f, 0.5f, -4.5f};
+	spheres[2].radius = 1.f;
+	spheres[2].matId = 3;
 
 	Plane planes[10] = {};
 	planes[0].normal = {0.f, 1.f, 0.f};
@@ -530,7 +540,7 @@ int main(int arc, char** argv)
 
 	Scene scene = {};
 	scene.spheres = spheres;
-	scene.sphereCount = 2;
+	scene.sphereCount = 3;
 	scene.planes = planes;
 	scene.planesCount = 1;
 	//scene.triangles = &triangle;
