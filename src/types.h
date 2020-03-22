@@ -2,6 +2,9 @@
 #define TYPES_H
 
 #include <cstdint>
+#include <random>
+#include <vector>
+
 #include "maths.h"
 #include "timer.h"
 
@@ -25,8 +28,10 @@ struct PinholeCamera
 {
 	Vec3 u, v, w;
 	Vec3 origin;
-	float znear;
 	float vfov;
+	float rlens;
+	float znear;
+	float zfocal;
 };
 
 struct Ray
@@ -40,11 +45,6 @@ struct PointLight
 	float intensity;
 	Vec3 color;//specular && diffuse cols
 	Vec3 position;
-};
-
-struct SurfaceRecord
-{
-	Vec3 normal;
 };
 
 struct Plane
@@ -112,5 +112,11 @@ struct Scene
 	uint32_t pointLightCount;
 };
 
+struct RandomCtx
+{
+	std::default_random_engine rengine;
+	std::uniform_real_distribution<float> distr;
+};
 
+static const float EPSILON = 0.0001f;
 #endif

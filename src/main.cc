@@ -3,8 +3,9 @@
 #include "types.h"
 #include "bitmap.h"
 #include "logging.h"
+#include "sampler.h"
 
-static Ray getPrimaryRay(float x, float y, uint32_t width, uint32_t height, const Film& film, const PinholeCamera& camera)
+static Ray getPrimaryRay(float x, float y, const Film& film, const PinholeCamera& camera, const std::vector<Vec2>& diskSamples, RandomCtx& rctx)
 {
 	//pixel to world image plane
 	Vec2 filmPoint = 
@@ -13,9 +14,15 @@ static Ray getPrimaryRay(float x, float y, uint32_t width, uint32_t height, cons
 		y * film.pixelSize - film.worldHeight / 2.f,
 	};
 
+	float px = filmPoint.x * camera.zfocal / camera.znear;
+	float py = filmPoint.y * camera.zfocal / camera.znear;
+	
+	Vec2 circleSample = sampleUnitCircle(rctx, diskSamples) * camera.rlens;
 	Ray ray = {};
-	ray.origin = camera.origin;
-	ray.direction = normaliseVec3(filmPoint.x * camera.u + filmPoint.y * camera.v - camera.znear * camera.w);
+	
+	ray.origin = camera.origin + circleSample.u * camera.u + circleSample.v * camera.v;
+	//ray.direction = normaliseVec3(filmPoint.x * camera.u + filmPoint.y * camera.v - camera.znear * camera.w);
+	ray.direction = normaliseVec3((px - circleSample.x) * camera.u + (py - circleSample.y) * camera.v - camera.zfocal * camera.w);
 	
 	return ray;
 }
@@ -87,8 +94,6 @@ static inline Vec3 refractRay(const Vec3& incident, const Vec3& normal, float io
 	*refracted = true;
 	return refractedRay;
 }
-
-const float EPSILON = 0.0001f;
 
 static bool rayPlaneIntersect(const Ray& ray, const Plane& plane, float* closestDistance)
 {
@@ -285,13 +290,13 @@ static bool visible(const Scene& scene, const Vec3& from, const Vec3& to)
 	return true;
 }
 
-static const uint32_t MAX_DEPTH = 4;
 
 static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 {
 	Vec3 color = {};
-	const Vec3 background = {0.447f, 0.941f, 0.972f};
-//	color = background;
+	static const uint32_t MAX_DEPTH = 4;
+	static const Vec3 background = {0.447f, 0.941f, 0.972f};
+
 	if(depth > MAX_DEPTH) return color;
 
 	Surfel surfel = {};
@@ -477,13 +482,15 @@ int main(int arc, char** argv)
 	camera.u = xAxis;
 	camera.v = yAxis;
 	camera.w = zAxis;
+	camera.zfocal = 2.5f;
+	camera.rlens = 0.05f;
 
 	Film film = {};
 	film.aspect = bitmap.width / (float)bitmap.height;
 	film.worldHeight = 2.f * camera.znear * tanf(camera.vfov / 2.f);
 	film.worldWidth = film.worldHeight * film.aspect;
 	film.pixelSize = film.worldWidth / (float)bitmap.width;
-	film.sampleCount = 16;
+	film.sampleCount = 100;
 
 	PointLight lights[2] = {};
 	lights[0].color = {0.96f, 1.f, 0.46f};
@@ -515,6 +522,12 @@ int main(int arc, char** argv)
 	materials[3].specularGlossiness = 256;
 	materials[3].mtype = MTYPE_MIRROR;
 	
+	materials[4].diffuseColor = {0.96f, 0.337f, 0.337f};
+	materials[4].specularColor = {0.5f, 0.5f, 0.5f};
+	materials[4].specularGlossiness = 256;
+	materials[4].ior = 1.f;
+	materials[4].mtype = MTYPE_DIELECTRIC;
+
 	Sphere spheres[10] = {};
 	spheres[0].position = {0.f, 0.5f, -2.f};
 	spheres[0].radius = 1.f;
@@ -527,6 +540,10 @@ int main(int arc, char** argv)
 	spheres[2].position = {-5.0f, 0.5f, -4.5f};
 	spheres[2].radius = 1.f;
 	spheres[2].matId = 3;
+
+	spheres[3].position = {-0.5f, 0.5f, 0.3f};
+	spheres[3].radius = 0.2f;
+	spheres[3].matId = 4;
 
 	Plane planes[10] = {};
 	planes[0].normal = {0.f, 1.f, 0.f};
@@ -561,6 +578,10 @@ int main(int arc, char** argv)
 	std::default_random_engine engine(device());
 	std::uniform_real_distribution<float> distr(0.f, 1.f);
 	auto randomVal = [&]() {return distr(engine);};
+	
+	RandomCtx rctx = {engine, distr};
+	auto&& squareSamples = generateJitteredSamplesOnUnitSquare(rctx, film.sampleCount);
+	auto&& circleSamples = mapJitteredSquareSamplesToUnitCircle(squareSamples);
 
 	for(uint32_t i = 0; i < bitmap.height; i++)
 	{
@@ -574,7 +595,7 @@ int main(int arc, char** argv)
 				{
 					const float samplePosU = j + (u + randomVal())/(float)sampleCount;
 					const float samplePosV = i + (v + randomVal())/(float)sampleCount;
-					Ray ray = getPrimaryRay(samplePosU, samplePosV, bitmap.width, bitmap.height, film, camera);
+					Ray ray = getPrimaryRay(samplePosU, samplePosV, film, camera, circleSamples, rctx);
 					color += rayCast(scene, ray);
 				}
 			}
