@@ -24,7 +24,7 @@ struct Film
 	uint32_t sampleCount;
 };
 
-struct PinholeCamera
+struct Camera
 {
 	Vec3 u, v, w;
 	Vec3 origin;
@@ -96,20 +96,11 @@ struct Surfel
 
 struct Scene
 {
-	Sphere* spheres;
-	uint32_t sphereCount;
-
-	Plane* planes;
-	uint32_t planesCount;
-
-	Triangle* triangles;
-	uint32_t triangleCount;
-
-	Material* materials;
-	uint32_t materialCount;
-
-	PointLight* pointLights;
-	uint32_t pointLightCount;
+	std::vector<Plane> planes;
+	std::vector<Sphere> spheres;
+	std::vector<Triangle> triangles;
+	std::vector<Material> materials;
+	std::vector<PointLight> pointLights;
 };
 
 struct RandomCtx
@@ -119,4 +110,5 @@ struct RandomCtx
 };
 
 static const float EPSILON = 0.0001f;
+
 #endif

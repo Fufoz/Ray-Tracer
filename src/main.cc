@@ -5,7 +5,7 @@
 #include "logging.h"
 #include "sampler.h"
 
-static Ray getPrimaryRay(float x, float y, const Film& film, const PinholeCamera& camera, const std::vector<Vec2>& diskSamples, RandomCtx& rctx)
+static Ray getPrimaryRay(float x, float y, const Film& film, const Camera& camera, const std::vector<Vec2>& diskSamples, RandomCtx& rctx)
 {
 	//pixel to world image plane
 	Vec2 filmPoint = 
@@ -260,28 +260,28 @@ static bool visible(const Scene& scene, const Vec3& from, const Vec3& to)
 	shadowRay.origin = from + epsilonOffset * shadowRay.direction;
 	const float maxDistance = lengthVec3(to - from);
 	
-	for(uint32_t i = 0; i < scene.sphereCount; i++)
+	for(auto& sphere : scene.spheres)
 	{
 		float currentDistance = {};
-		if(raySphereIntersect(shadowRay, scene.spheres[i], &currentDistance) && currentDistance < maxDistance)
+		if(raySphereIntersect(shadowRay, sphere, &currentDistance) && currentDistance < maxDistance)
 		{
 			return false;
 		}
 	}//spheres count
 
-	for(uint32_t i = 0; i < scene.planesCount; i++)
+	for(auto& plane : scene.planes)
 	{
 		float currentDistance = {};
-		if(rayPlaneIntersect(shadowRay, scene.planes[i], &currentDistance) && currentDistance < maxDistance)
+		if(rayPlaneIntersect(shadowRay, plane, &currentDistance) && currentDistance < maxDistance)
 		{
 			return false;
 		}
 	}//planes count
 
-	for(uint32_t i = 0; i < scene.triangleCount; i++)
+	for(auto& triangle : scene.triangles)
 	{
 		float currentDistance = {};
-		if(rayTriangleIntersect(shadowRay, scene.triangles[i], &currentDistance) && currentDistance < maxDistance)
+		if(rayTriangleIntersect(shadowRay, triangle, &currentDistance) && currentDistance < maxDistance)
 		{
 			return false;
 		}
@@ -310,7 +310,7 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 	Ray currentRay = ray;
 	const float bounceCoeff = 0.001f;
 	
-	for(uint32_t i = 0; i < scene.sphereCount; i++)
+	for(uint32_t i = 0; i < scene.spheres.size(); i++)
 	{
 		float currentDistance = {};
 		if(raySphereIntersect(currentRay, scene.spheres[i], &currentDistance))
@@ -325,7 +325,7 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 		}
 	}//spheres count
 
-	for(uint32_t i = 0; i < scene.planesCount; i++)
+	for(uint32_t i = 0; i < scene.planes.size(); i++)
 	{
 		float currentDistance = {};
 		if(rayPlaneIntersect(currentRay, scene.planes[i], &currentDistance))
@@ -340,7 +340,7 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 		}
 	}//planes count
 
-	for(uint32_t i = 0; i < scene.triangleCount; i++)
+	for(uint32_t i = 0; i < scene.triangles.size(); i++)
 	{
 		float currentDistance = {};
 		if(rayTriangleIntersect(currentRay, scene.triangles[i], &currentDistance))
@@ -387,11 +387,11 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 		Vec3 diffuse= {};
 		diffuse += ambientTerm;
 
-		for(uint32_t i = 0; i < scene.pointLightCount; i++)
+		for(auto& pointLight : scene.pointLights)
 		{
-			if(visible(scene, surfel.position, scene.pointLights[i].position))
+			if(visible(scene, surfel.position, pointLight.position))
 			{
-				diffuse += phongShade(currentRay, surfel, scene.pointLights[i]);
+				diffuse += phongShade(currentRay, surfel, pointLight);
 			}
 		}
 
@@ -458,39 +458,28 @@ static Vec3 rayCast(const Scene& scene, const Ray& ray, int depth = 0)
 	return clamp(color, RGB_BLACK, RGB_WHITE);
 }
 
-int main(int arc, char** argv)
+static void buildScene(const Bitmap& bitmap, Scene* scene, Camera* camera, Film* film)
 {
-	hoth::log::setSeverityMask(hoth::log::MASK_ALL);
-	hoth::log::info("Hello from hoth!");
-
-	Bitmap bitmap = {};
-	if(!createBitmap(1920u, 1080u, &bitmap))
-	{
-		return -1;
-	}
-
-	PinholeCamera camera = {};
 	//absolute distance to image plane
-	camera.znear = 1.f;
-	camera.vfov = toRad(90.f);
-	camera.origin = {0.f, 0.9f, 1.f};
+	camera->znear = 1.f;
+	camera->vfov = toRad(90.f);
+	camera->origin = {0.f, 0.9f, 1.f};
 	Vec3 UpDir = {0.f, 0.5f, 0.f};
 	Vec3 lookAt = {0.f, 0.f, -1.f};
-	Vec3 zAxis  = normaliseVec3(camera.origin - lookAt);
+	Vec3 zAxis  = normaliseVec3(camera->origin - lookAt);
 	Vec3 xAxis = normaliseVec3(cross(UpDir, zAxis));
 	Vec3 yAxis = cross(zAxis, xAxis);
-	camera.u = xAxis;
-	camera.v = yAxis;
-	camera.w = zAxis;
-	camera.zfocal = 2.5f;
-	camera.rlens = 0.05f;
+	camera->u = xAxis;
+	camera->v = yAxis;
+	camera->w = zAxis;
+	camera->zfocal = 2.5f;
+	camera->rlens = 0.05f;
 
-	Film film = {};
-	film.aspect = bitmap.width / (float)bitmap.height;
-	film.worldHeight = 2.f * camera.znear * tanf(camera.vfov / 2.f);
-	film.worldWidth = film.worldHeight * film.aspect;
-	film.pixelSize = film.worldWidth / (float)bitmap.width;
-	film.sampleCount = 100;
+	film->aspect = bitmap.width / (float)bitmap.height;
+	film->worldHeight = 2.f * camera->znear * tanf(camera->vfov / 2.f);
+	film->worldWidth = film->worldHeight * film->aspect;
+	film->pixelSize = film->worldWidth / (float)bitmap.width;
+	film->sampleCount = 100;
 
 	PointLight lights[2] = {};
 	lights[0].color = {0.96f, 1.f, 0.46f};
@@ -541,10 +530,6 @@ int main(int arc, char** argv)
 	spheres[2].radius = 1.f;
 	spheres[2].matId = 3;
 
-	spheres[3].position = {-0.5f, 0.5f, 0.3f};
-	spheres[3].radius = 0.2f;
-	spheres[3].matId = 4;
-
 	Plane planes[10] = {};
 	planes[0].normal = {0.f, 1.f, 0.f};
 	planes[0].point = {0.f, -0.8f, 0.f};
@@ -554,18 +539,32 @@ int main(int arc, char** argv)
 	planes[1].point = {0.f, 0.f, -4.f};
 	planes[1].matId = 2;
 
+	scene->materials = {
+		materials[0], materials[1],
+		materials[2], materials[3],
+		materials[4]
+	};
+	scene->spheres = {spheres[0], spheres[1], spheres[2]};
+	scene->planes = {planes[0]};
+	scene->pointLights = {lights[0]};
+}
 
+
+int main(int arc, char** argv)
+{
+	hoth::log::setSeverityMask(hoth::log::MASK_ALL);
+	hoth::log::info("Hello from hoth!");
+
+	Bitmap bitmap = {};
+	if(!createBitmap(1920u, 1080u, &bitmap))
+	{
+		return -1;
+	}
+
+	Film film = {};
 	Scene scene = {};
-	scene.spheres = spheres;
-	scene.sphereCount = 3;
-	scene.planes = planes;
-	scene.planesCount = 1;
-	//scene.triangles = &triangle;
-	//scene.triangleCount = 1;
-	scene.materials = materials;
-	scene.materialCount = 3;
-	scene.pointLights = lights;
-	scene.pointLightCount = 1;
+	Camera camera = {};
+	buildScene(bitmap,&scene, &camera, &film);
 
 	uint8_t* pixels = (uint8_t*)bitmap.pixels;
 
